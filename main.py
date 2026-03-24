@@ -61,12 +61,11 @@ class App:
         self._region_selector = RegionSelector()
         self._region_selector.region_selected.connect(self._on_region_selected)
 
-        self._hotkeys = HotkeyManager(
-            on_scan=self._trigger_scan,
-            on_toggle=self._overlay.toggle_visibility,
-            on_region=self._region_selector.start,
-            on_quit=self._quit,
-        )
+        self._hotkeys = HotkeyManager()
+        self._hotkeys.scan_requested.connect(self._trigger_scan)
+        self._hotkeys.toggle_requested.connect(self._overlay.toggle_visibility)
+        self._hotkeys.region_requested.connect(self._region_selector.start)
+        self._hotkeys.quit_requested.connect(self._quit)
         self._thread: Optional[QThread] = None
         self._worker: Optional[AIWorker] = None
 
@@ -110,9 +109,14 @@ class App:
 
     def _start_worker(self, b64_image: str) -> None:
         """Launch the AI worker in a background QThread."""
-        # Clean up any previous thread
-        if self._thread is not None and self._thread.isRunning():
-            return  # Ignore new request while one is in flight
+        # Ignore new request while one is already in flight
+        if self._thread is not None:
+            try:
+                if self._thread.isRunning():
+                    return
+            except RuntimeError:
+                # C++ object already deleted — safe to proceed
+                pass
 
         self._thread = QThread()
         self._worker = AIWorker(b64_image, self._ai_client)
@@ -123,7 +127,8 @@ class App:
         self._worker.error.connect(self._on_ai_error)
         self._worker.finished.connect(self._thread.quit)
         self._worker.error.connect(self._thread.quit)
-        self._thread.finished.connect(self._thread.deleteLater)
+        # Clear Python references when the thread finishes, then schedule deletion
+        self._thread.finished.connect(self._cleanup_worker)
 
         self._thread.start()
 
@@ -132,6 +137,15 @@ class App:
 
     def _on_ai_error(self, message: str) -> None:
         self._overlay.show_error(message)
+
+    def _cleanup_worker(self) -> None:
+        """Release thread/worker references so the next scan can proceed."""
+        if self._thread is not None:
+            self._thread.deleteLater()
+        if self._worker is not None:
+            self._worker.deleteLater()
+        self._thread = None
+        self._worker = None
 
     def _on_region_selected(self, x: int, y: int, w: int, h: int) -> None:
         self._region = (x, y, w, h)

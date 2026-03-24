@@ -43,21 +43,33 @@ class OverlayWindow(QWidget):
     # Public API
     # ------------------------------------------------------------------
 
+    _LABEL_BASE_CSS = (
+        "color: #e0e0e0; font-size: 13px; background: transparent;"
+    )
+
     def show_loading(self) -> None:
         """Show a loading indicator while waiting for the AI response."""
-        self._result_label.setText("⏳ Analyzing screen…")
-        self._result_label.setStyleSheet("color: #aaaaaa; font-style: italic;")
+        self._result_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._result_label.setText("⏳ Đang phân tích màn hình…")
+        self._result_label.setStyleSheet(
+            f"{self._LABEL_BASE_CSS} color: #aaaaaa; font-style: italic;"
+        )
         if not self.isVisible():
             self.show()
 
     def show_result(self, text: str) -> None:
         """Display the AI answer in the overlay.
 
+        Markdown-style text from the AI is converted to simple HTML
+        so the QLabel renders headings, bold, lists, etc.
+
         Args:
             text: Plain-text or markdown-ish response from the AI model.
         """
-        self._result_label.setText(text)
-        self._result_label.setStyleSheet("color: #ffffff;")
+        html = self._markdown_to_html(text)
+        self._result_label.setTextFormat(Qt.TextFormat.RichText)
+        self._result_label.setText(html)
+        self._result_label.setStyleSheet(self._LABEL_BASE_CSS)
         if not self.isVisible():
             self.show()
 
@@ -67,8 +79,11 @@ class OverlayWindow(QWidget):
         Args:
             message: Human-readable error description.
         """
+        self._result_label.setTextFormat(Qt.TextFormat.PlainText)
         self._result_label.setText(f"❌ Error: {message}")
-        self._result_label.setStyleSheet("color: #ff6b6b;")
+        self._result_label.setStyleSheet(
+            f"{self._LABEL_BASE_CSS} color: #ff6b6b;"
+        )
         if not self.isVisible():
             self.show()
 
@@ -148,15 +163,18 @@ class OverlayWindow(QWidget):
         self._result_label = QLabel("Ready. Press Ctrl+Shift+S to scan screen.")
         self._result_label.setWordWrap(True)
         self._result_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self._result_label.setStyleSheet("color: #cccccc; font-size: 13px;")
+        self._result_label.setStyleSheet(self._LABEL_BASE_CSS)
         self._result_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         self._result_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
+        self._result_label.setOpenExternalLinks(False)
 
         scroll.setWidget(self._result_label)
+        # Ensure the scroll viewport is also transparent
+        scroll.viewport().setStyleSheet("background: transparent;")
         outer_layout.addWidget(scroll)
 
         # Hotkey hint
@@ -166,3 +184,86 @@ class OverlayWindow(QWidget):
         hint.setStyleSheet("color: #555555; font-size: 10px;")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         outer_layout.addWidget(hint)
+
+    # ------------------------------------------------------------------
+    # Markdown → HTML helper
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _markdown_to_html(text: str) -> str:
+        """Convert a simplified subset of Markdown to HTML for QLabel.
+
+        Handles: headings (##), bold (**), italic (*), inline code (`),
+        unordered lists (- / *), ordered lists (1.), and paragraphs.
+        """
+        import re
+
+        lines = text.split("\n")
+        html_lines: list[str] = []
+        in_ul = False
+        in_ol = False
+
+        def _close_lists() -> None:
+            nonlocal in_ul, in_ol
+            if in_ul:
+                html_lines.append("</ul>")
+                in_ul = False
+            if in_ol:
+                html_lines.append("</ol>")
+                in_ol = False
+
+        for line in lines:
+            stripped = line.strip()
+
+            # Blank line → close lists, add spacing
+            if not stripped:
+                _close_lists()
+                html_lines.append("<br>")
+                continue
+
+            # Headings
+            m_heading = re.match(r"^(#{1,4})\s+(.*)", stripped)
+            if m_heading:
+                _close_lists()
+                level = len(m_heading.group(1))
+                sizes = {1: "17px", 2: "15px", 3: "14px", 4: "13px"}
+                size = sizes.get(level, "13px")
+                html_lines.append(
+                    f'<p style="font-size:{size}; font-weight:bold; '
+                    f'color:#61dafb; margin:4px 0;">{m_heading.group(2)}</p>'
+                )
+                continue
+
+            # Unordered list item
+            m_ul = re.match(r"^[-*]\s+(.*)", stripped)
+            if m_ul:
+                if not in_ul:
+                    _close_lists()
+                    html_lines.append("<ul style='margin:2px 0 2px 16px;'>")
+                    in_ul = True
+                html_lines.append(f"<li>{m_ul.group(1)}</li>")
+                continue
+
+            # Ordered list item
+            m_ol = re.match(r"^\d+[.)\s]\s*(.*)", stripped)
+            if m_ol:
+                if not in_ol:
+                    _close_lists()
+                    html_lines.append("<ol style='margin:2px 0 2px 16px;'>")
+                    in_ol = True
+                html_lines.append(f"<li>{m_ol.group(1)}</li>")
+                continue
+
+            # Regular paragraph
+            _close_lists()
+            html_lines.append(f"<p style='margin:2px 0;'>{stripped}</p>")
+
+        _close_lists()
+        html = "\n".join(html_lines)
+
+        # Inline formatting
+        html = re.sub(r"`([^`]+)`", r"<code style='background:#333;padding:1px 4px;border-radius:3px;color:#f8c555;'>\1</code>", html)
+        html = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", html)
+        html = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<i>\1</i>", html)
+
+        return html

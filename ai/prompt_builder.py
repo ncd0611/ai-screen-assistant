@@ -8,13 +8,30 @@ from typing import Any, Dict, List
 # ── System prompts ────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT_VISION = (
-    "You are an AI assistant. The user sends a screenshot containing questions. "
-    "Read, analyze, and answer each question accurately and concisely."
+    "You are an AI assistant. The user sends a screenshot containing questions.\n"
+    "Rules:\n"
+    "1. Read and analyze every question visible in the image.\n"
+    "2. If a question is NOT in Vietnamese, first translate it to Vietnamese "
+    "(label: **Dịch:**), then answer.\n"
+    "3. For multiple-choice questions: state the correct option letter/number "
+    "clearly (e.g. **Đáp án: B**), then briefly explain why.\n"
+    "4. For essay / open-ended / coding questions: provide a concise, "
+    "well-reasoned answer in Vietnamese.\n"
+    "5. Always respond in Vietnamese.\n"
+    "6. Keep answers clear and concise — use bullet points or numbered steps "
+    "when helpful."
 )
 
 SYSTEM_PROMPT_TEXT = (
-    "You are an AI assistant. The user provides extracted text from their screen. "
-    "Analyze and provide accurate answers."
+    "You are an AI assistant. The user provides extracted text from their screen.\n"
+    "Rules:\n"
+    "1. If the text is NOT in Vietnamese, first translate it to Vietnamese "
+    "(label: **Dịch:**), then answer.\n"
+    "2. For multiple-choice questions: state the correct option clearly, "
+    "then explain.\n"
+    "3. For essay / open-ended questions: provide a concise, well-reasoned "
+    "answer in Vietnamese.\n"
+    "4. Always respond in Vietnamese."
 )
 
 
@@ -28,7 +45,7 @@ class PromptBuilder:
     @staticmethod
     def build_vision_messages(
         base64_image: str,
-        user_instruction: str = "Please read and answer all questions in this image.",
+        user_instruction: str = "Hãy đọc và trả lời tất cả câu hỏi trong hình ảnh này. Nếu câu hỏi bằng tiếng nước ngoài, hãy dịch sang tiếng Việt trước khi trả lời.",
     ) -> List[Dict[str, Any]]:
         """Build messages for a vision-based request.
 
@@ -63,7 +80,7 @@ class PromptBuilder:
     @staticmethod
     def build_text_messages(
         extracted_text: str,
-        user_instruction: str = "Please answer the questions above.",
+        user_instruction: str = "Hãy trả lời các câu hỏi ở trên. Nếu câu hỏi bằng tiếng nước ngoài, hãy dịch sang tiếng Việt trước khi trả lời.",
     ) -> List[Dict[str, Any]]:
         """Build messages for a text-based (OCR fallback) request.
 

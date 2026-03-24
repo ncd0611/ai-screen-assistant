@@ -1,48 +1,52 @@
-"""Global hotkey manager using pynput."""
+"""Global hotkey manager using pynput.
+
+pynput callbacks execute on a background thread.  Qt GUI operations **must**
+run on the main thread.  This module bridges the two worlds by emitting Qt
+signals from the pynput callbacks — Qt automatically queues them onto the
+main-thread event loop (``QueuedConnection``).
+"""
 
 from __future__ import annotations
 
-from typing import Callable, Dict
+from typing import Dict
 
+from PyQt6.QtCore import QObject, pyqtSignal
 from pynput import keyboard
 
 import config
 
 
-class HotkeyManager:
+class HotkeyManager(QObject):
     """Registers and listens for global hotkeys using pynput.
 
     Hotkeys are matched regardless of which window has focus, so they work
     even when the user is interacting with a browser.
 
-    Default bindings
-    ----------------
-    * ``Ctrl+Shift+S``: capture screen and query AI
-    * ``Ctrl+Shift+H``: toggle overlay visibility
-    * ``Ctrl+Shift+R``: open region selector
-    * ``Ctrl+Shift+Q``: quit the application
+    Instead of calling callbacks directly from the pynput background thread,
+    this class emits Qt signals.  Connect to these signals from the main
+    thread to safely perform GUI work.
+
+    Signals
+    -------
+    * ``scan_requested``  — emitted when ``Ctrl+Shift+S`` is pressed
+    * ``toggle_requested`` — emitted when ``Ctrl+Shift+H`` is pressed
+    * ``region_requested`` — emitted when ``Ctrl+Shift+R`` is pressed
+    * ``quit_requested``   — emitted when ``Ctrl+Shift+Q`` is pressed
     """
 
-    def __init__(
-        self,
-        on_scan: Callable[[], None],
-        on_toggle: Callable[[], None],
-        on_region: Callable[[], None],
-        on_quit: Callable[[], None],
-    ) -> None:
-        """Initialise with handler callbacks.
+    scan_requested = pyqtSignal()
+    toggle_requested = pyqtSignal()
+    region_requested = pyqtSignal()
+    quit_requested = pyqtSignal()
 
-        Args:
-            on_scan: Called when the scan hotkey is pressed.
-            on_toggle: Called when the toggle-visibility hotkey is pressed.
-            on_region: Called when the region-select hotkey is pressed.
-            on_quit: Called when the quit hotkey is pressed.
-        """
-        self._bindings: Dict[str, Callable[[], None]] = {
-            config.HOTKEY_SCAN: on_scan,
-            config.HOTKEY_TOGGLE: on_toggle,
-            config.HOTKEY_REGION: on_region,
-            config.HOTKEY_QUIT: on_quit,
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        # Map hotkey combos → *signal emit* methods (thread-safe in Qt).
+        self._bindings: Dict[str, object] = {
+            config.HOTKEY_SCAN: self.scan_requested.emit,
+            config.HOTKEY_TOGGLE: self.toggle_requested.emit,
+            config.HOTKEY_REGION: self.region_requested.emit,
+            config.HOTKEY_QUIT: self.quit_requested.emit,
         }
         self._listener: keyboard.GlobalHotKeys | None = None
 
