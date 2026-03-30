@@ -135,7 +135,8 @@ class App:
         self._thread.start()
 
     def _on_ai_finished(self, answer: str) -> None:
-        self._overlay.show_result(answer)
+        token_info = self._ai_client.current_token_label
+        self._overlay.show_result(f"*({token_info})*\n\n{answer}")
 
     def _on_ai_error(self, message: str) -> None:
         self._overlay.show_error(message)

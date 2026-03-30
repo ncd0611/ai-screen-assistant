@@ -1,13 +1,16 @@
-"""Async GitHub Models API client."""
+"""Async GitHub Models API client with automatic token rotation."""
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 
 import httpx
 
 import config
 from ai.prompt_builder import PromptBuilder
+
+logger = logging.getLogger(__name__)
 
 
 class GitHubAIClient:
@@ -19,39 +22,62 @@ class GitHubAIClient:
       vision-capable model such as ``openai/gpt-4o``.
     * **Text** (fallback): sends OCR-extracted text when a vision model is
       unavailable or when the caller explicitly requests text mode.
+
+    When multiple tokens are configured (comma-separated in ``GITHUB_TOKEN``),
+    the client automatically rotates to the next token on rate-limit (429) or
+    auth failure (401).
     """
 
     _ENDPOINT = config.API_ENDPOINT
+    # HTTP status codes that trigger a token rotation
+    _ROTATE_STATUS_CODES = {429, 401, 403}
 
     def __init__(
         self,
-        token: Optional[str] = None,
+        tokens: Optional[List[str]] = None,
         model: Optional[str] = None,
         temperature: float = config.TEMPERATURE,
         max_tokens: int = config.MAX_TOKENS,
         timeout: float = 60.0,
     ) -> None:
-        """Initialise the client.
-
-        Args:
-            token: GitHub Personal Access Token.  Defaults to
-                ``config.GITHUB_TOKEN``.
-            model: Model identifier.  Defaults to ``config.AI_MODEL``.
-            temperature: Sampling temperature (lower = more deterministic).
-            max_tokens: Maximum tokens in the model response.
-            timeout: HTTP request timeout in seconds.
-        """
-        self._token: str = token or config.GITHUB_TOKEN
+        self._tokens: List[str] = tokens or list(config.GITHUB_TOKENS)
         self._model: str = model or config.AI_MODEL
         self._temperature = temperature
         self._max_tokens = max_tokens
         self._timeout = timeout
+        self._token_index: int = 0
 
-        if not self._token:
+        if not self._tokens:
             raise ValueError(
                 "GITHUB_TOKEN is not set. "
                 "Add it to your .env file or set it as an environment variable."
             )
+
+    # ------------------------------------------------------------------
+    # Token helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def _current_token(self) -> str:
+        return self._tokens[self._token_index]
+
+    @property
+    def token_count(self) -> int:
+        return len(self._tokens)
+
+    @property
+    def current_token_label(self) -> str:
+        """Return a safe label like 'Token 1/3' for UI display."""
+        return f"Token {self._token_index + 1}/{len(self._tokens)}"
+
+    def _rotate_token(self) -> bool:
+        """Advance to the next token. Returns True if a new token is available."""
+        next_idx = self._token_index + 1
+        if next_idx < len(self._tokens):
+            self._token_index = next_idx
+            logger.info("Rotated to %s", self.current_token_label)
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # Public API
@@ -103,21 +129,39 @@ class GitHubAIClient:
 
     def _build_headers(self) -> Dict[str, str]:
         return {
-            "Authorization": f"Bearer {self._token}",
+            "Authorization": f"Bearer {self._current_token}",
             "Content-Type": "application/json",
         }
 
     async def _call(self, messages: List[Dict[str, Any]]) -> str:
-        """POST *messages* to the API and return the reply text."""
+        """POST *messages* to the API, rotating tokens on rate-limit errors."""
         payload = self._build_payload(messages)
-        headers = self._build_headers()
+        last_error: Optional[Exception] = None
+        start_index = self._token_index
 
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.post(
-                self._ENDPOINT, json=payload, headers=headers
-            )
-            response.raise_for_status()
-            data = response.json()
+        while True:
+            headers = self._build_headers()
+            try:
+                async with httpx.AsyncClient(timeout=self._timeout) as client:
+                    response = await client.post(
+                        self._ENDPOINT, json=payload, headers=headers
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+            except httpx.HTTPStatusError as exc:
+                last_error = exc
+                status = exc.response.status_code
+                if status in self._ROTATE_STATUS_CODES and self._rotate_token():
+                    logger.warning(
+                        "%s on %s — rotating to %s",
+                        status, f"Token {self._token_index}/{len(self._tokens)}",
+                        self.current_token_label,
+                    )
+                    continue
+                # All tokens exhausted or non-rotatable error
+                raise
+            else:
+                break
 
         try:
             return data["choices"][0]["message"]["content"]
