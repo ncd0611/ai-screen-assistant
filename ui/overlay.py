@@ -94,6 +94,26 @@ class OverlayWindow(QWidget):
         else:
             self.show()
 
+    def update_capture_mode(self, region=None) -> None:
+        """Update the status bar to show the current capture mode.
+
+        Args:
+            region: Optional (x, y, w, h) tuple. None = full screen.
+        """
+        if region is not None:
+            x, y, w, h = region
+            self._status_label.setText(
+                f"📐 Vùng chụp: {w}×{h} tại ({x},{y})"
+            )
+            self._status_label.setStyleSheet(
+                "color: #61dafb; font-size: 11px; background: transparent;"
+            )
+        else:
+            self._status_label.setText("🖥️ Chụp toàn màn hình")
+            self._status_label.setStyleSheet(
+                "color: #888888; font-size: 11px; background: transparent;"
+            )
+
     # ------------------------------------------------------------------
     # Qt overrides — window chrome
     # ------------------------------------------------------------------
@@ -150,6 +170,13 @@ class OverlayWindow(QWidget):
             "color: #61dafb; font-size: 14px; font-weight: bold;"
         )
         outer_layout.addWidget(title)
+
+        # Capture mode status
+        self._status_label = QLabel("🖥️ Chụp toàn màn hình")
+        self._status_label.setStyleSheet(
+            "color: #888888; font-size: 11px; background: transparent;"
+        )
+        outer_layout.addWidget(self._status_label)
 
         # Scrollable result area
         scroll = QScrollArea()

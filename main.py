@@ -60,6 +60,7 @@ class App:
         self._region: Optional[Tuple[int, int, int, int]] = config.CAPTURE_REGION
         self._region_selector = RegionSelector()
         self._region_selector.region_selected.connect(self._on_region_selected)
+        self._region_selector.region_cleared.connect(self._on_region_cleared)
 
         self._hotkeys = HotkeyManager()
         self._hotkeys.scan_requested.connect(self._trigger_scan)
@@ -79,6 +80,7 @@ class App:
         Returns:
             Exit code (0 = normal exit).
         """
+        self._overlay.update_capture_mode(self._region)
         self._overlay.show()
         self._hotkeys.start()
         return self._qt_app.exec()
@@ -149,6 +151,13 @@ class App:
 
     def _on_region_selected(self, x: int, y: int, w: int, h: int) -> None:
         self._region = (x, y, w, h)
+        self._overlay.update_capture_mode(self._region)
+        self._overlay.show_result(f"Đã chọn vùng chụp: **{w}×{h}** tại ({x}, {y})\n\nNhấn **Ctrl+Shift+S** để quét vùng này.\nNhấn **Ctrl+Shift+R** để chọn lại (ESC/Right-click = toàn màn hình).")
+
+    def _on_region_cleared(self) -> None:
+        self._region = None
+        self._overlay.update_capture_mode(None)
+        self._overlay.show_result("Đã chuyển về chế độ **chụp toàn màn hình**.\n\nNhấn **Ctrl+Shift+S** để quét.")
 
     def _quit(self) -> None:
         self._hotkeys.stop()
