@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional, Tuple
 
 from PyQt6.QtCore import Qt, QPoint, QRect, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen
+from PyQt6.QtGui import QColor, QCursor, QFont, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import QApplication, QWidget
 
 
@@ -116,7 +116,46 @@ class RegionSelector(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setCursor(Qt.CursorShape.CrossCursor)
+        self.setCursor(self._make_crosshair_cursor())
+
+    @staticmethod
+    def _make_crosshair_cursor() -> QCursor:
+        """Create a bold white crosshair cursor for visibility on dark overlays."""
+        size = 33          # total pixmap size (odd number so center is exact)
+        center = size // 2
+        gap = 5            # gap around the centre point (no line drawn here)
+        line_width = 3     # stroke width
+
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Dark shadow stroke for contrast on light backgrounds
+        shadow_pen = QPen(QColor(0, 0, 0, 160), line_width + 2)
+        shadow_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+        painter.setPen(shadow_pen)
+        # Horizontal shadow
+        painter.drawLine(0, center, center - gap - 1, center)
+        painter.drawLine(center + gap + 1, center, size - 1, center)
+        # Vertical shadow
+        painter.drawLine(center, 0, center, center - gap - 1)
+        painter.drawLine(center, center + gap + 1, center, size - 1)
+
+        # White foreground stroke
+        white_pen = QPen(QColor(255, 255, 255, 255), line_width)
+        white_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+        painter.setPen(white_pen)
+        # Horizontal
+        painter.drawLine(0, center, center - gap - 1, center)
+        painter.drawLine(center + gap + 1, center, size - 1, center)
+        # Vertical
+        painter.drawLine(center, 0, center, center - gap - 1)
+        painter.drawLine(center, center + gap + 1, center, size - 1)
+
+        painter.end()
+        return QCursor(pixmap, center, center)
 
     def _selection_rect(self) -> QRect:
         """Return a normalised QRect from the drag origin to the current point."""
